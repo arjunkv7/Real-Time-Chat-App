@@ -1,14 +1,21 @@
-import { server } from 'websocket';
+import { connection, server } from 'websocket';
 import http from "http";
+import { IncomingMessage, SupprotedMEssageTypes } from './messages/incomingMessage';
+import { InMemoreStore } from './store/inMemoryStore';
+import { UserManager } from './userManager';
 
-var httpServer = http.createServer(function(request, response) {
+var httpServer = http.createServer(function (request, response) {
     console.log((new Date()) + ' Received request for ' + request.url);
     response.writeHead(404);
     response.end();
 });
-httpServer.listen(8080, function() {
+
+httpServer.listen(8080, function () {
     console.log((new Date()) + ' Server is listening on port 8080');
 });
+
+const Store = new InMemoreStore();
+const userManager = new UserManager();
 
 let wsServer = new server({
     httpServer: httpServer,
@@ -21,31 +28,54 @@ let wsServer = new server({
 });
 
 function originIsAllowed(origin: string) {
-  // put logic here to detect whether the specified origin is allowed.
-  return true;
+    // put logic here to detect whether the specified origin is allowed.
+    return true;
 }
 
-wsServer.on('request', function(request) {
+wsServer.on('request', function (request) {
     if (!originIsAllowed(request.origin)) {
-      // Make sure we only accept requests from an allowed origin
-      request.reject();
-      console.log((new Date()) + ' Connection from origin ' + request.origin + ' rejected.');
-      return;
+        // Make sure we only accept requests from an allowed origin
+        request.reject();
+        console.log((new Date()) + ' Connection from origin ' + request.origin + ' rejected.');
+        return;
     }
-    
+
     var connection = request.accept('echo-protocol', request.origin);
     console.log((new Date()) + ' Connection accepted.');
-    connection.on('message', function(message) {
+    connection.on('message', function (message) {
         if (message.type === 'utf8') {
-            console.log('Received Message: ' + message.utf8Data);
-            connection.sendUTF(message.utf8Data);
+            try {
+                messageHandler(connection, JSON.parse(message.utf8Data))
+            } catch (e) {
+
+            }
+
+            // console.log('Received Message: ' + message.utf8Data);
+            // connection.sendUTF(message.utf8Data);
         }
-        else if (message.type === 'binary') {
-            console.log('Received Binary Message of ' + message.binaryData.length + ' bytes');
-            connection.sendBytes(message.binaryData);
-        }
+
     });
-    connection.on('close', function(reasonCode, description) {
+    connection.on('close', function (reasonCode, description) {
         console.log((new Date()) + ' Peer ' + connection.remoteAddress + ' disconnected.');
     });
 });
+
+function messageHandler(ws: connection, message: IncomingMessage,) {
+    if (message.type == SupprotedMEssageTypes.JoinRoom) {
+        const payload = message.payload;
+        userManager.addUser(payload.userId, payload.roomId, payload.name, ws)
+    }
+    if (message.type == SupprotedMEssageTypes.SendMessage) {
+        const payload = message.payload;
+        let user = userManager.getUser(payload.userId, payload.roomId);
+        if (!user) {
+            console.log('User not found');
+            return
+        }
+        Store.addChat(payload.userId, payload.message, user.name, payload.roomId);
+
+        //To do add bradcasat message
+
+    }
+
+}
